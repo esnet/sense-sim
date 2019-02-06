@@ -1,0 +1,35 @@
+Need to complete the installation instructions.
+
+python --version
+sudo yum update
+sudo yum install postgresql-server postgresql-contrib
+sudo postgresql-setup initdb
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+sudo passwd postgres
+su - postgres
+sudo easy_install pip
+sudo pip install --upgrade pip
+sudo yum install wget python-devel python-zope-interface
+sudo yum -y install gcc
+sudo pip install Twisted
+sudo pip install psycopg2
+sudo pip install psycopg2-binary
+sudo pip install twistar
+sudo pip install pycrypto pyasn1
+sudo pip install pyOpenSSL
+sudo pip install service_identity
+sudo pip install --upgrade pyasn1-modules
+sudo yum install maven
+
+$ git clone git://git.nordu.net/opennsa.git
+$ cd opennsa
+$ python2.7 setup.py build
+
+sudo vi /var/lib/pgsql/data/pg_hba.conf
+
+# TYPE DATABASE USER ADDRESS METHOD
+local  all      all          md5
+
+sudo service postgresql restart
+

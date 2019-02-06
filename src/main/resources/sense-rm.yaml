@@ -1,0 +1,100 @@
+# Configuration information for the internal HTTP server.
+server.address: localhost
+server.port: %d
+server.contextPath: /
+cxf.path: /nsi
+
+# The SENSE RM logic needs to know local context and driver to load.
+sense:
+  root: http://localhost:%d/
+  proxy:
+  driver: net.es.sense.rm.driver.nsi.NsiDriver
+
+# Path to the swagger API documentation.
+springfox.documentation.swagger.v2.path: /v2/api-docs
+springfox.documentation.swagger.v1.path: /v1/api-docs
+
+# Configuration for logging subsystem.
+logging:
+  config: file:./config/logback.xml
+  level:
+    ROOT: INFO
+    org.springframework: INFO
+    org.springframework.data: INFO
+    net.es.sense.rm: DEBUG
+  file: "sense%d.log"
+
+# Configuration for database.
+spring:
+ jpa:
+   generate-ddl: true
+   hibernate:
+     ddl-auto: create
+ datasource:
+   url: jdbc:postgresql://localhost:5432/sense%d
+   driver-class-name: org.postgresql.Driver
+   username: %s
+   password: %s
+   continue-on-error: true
+
+#spring.jpa.hibernate.ddl-auto: create
+#spring.jpa.hibernate.ddl-auto: update
+#spring.jpa.hibernate.ddl-auto: validate
+
+# The NSI configuration read by NSI driver.
+nsi:
+  # For NSI interactions we must have a designated NSA id.
+  nsaId: "%s:sense-rm"
+
+  #########################################
+  # DDS related configuration.            #
+  #########################################
+
+  # The DDS notification endpoint we will expose for callbacks.
+  ddsUrl: http://localhost:%d/api/dds/v1
+
+  # How often (in seconds) we query our remote subscription to see if it is still valid.
+  ddsAuditTimer: 600
+
+  # How long (in seconds) we wait to delete a document after it has expired.
+  ddsExpiryInterval: 600
+
+  # How many actors to instantiate in the DDS pool.
+  ddsPoolSize: 4
+
+  # The DDS server endpoint we will connect to.
+  peers:
+    - http://localhost:8401/dds
+
+  #########################################
+  # NSI Connection Service configuration. #
+  #########################################
+
+  # The associated NSA we will connect to for connection services.
+  providerNsaId: "%s"
+  providerConnectionURL: "https://localhost:%d/NSI/services/CS2"
+
+  # Our requester connection service endpoint.
+  requesterConnectionURL: "http://localhost:%d/nsi/nsi-v2/ConnectionServiceRequester"
+
+  # How often we audit our associated NSA for new connections.
+  connectionAuditTimer: 50
+
+  #########################################
+  # NML/MRML generation configuration.    #
+  #########################################
+
+  # The topology exposed through the SENSE-N-RM.
+  networkId: "%s"
+
+  # The default serviceDefinition if one is not specified.
+  defaultServiceType: http://services.ogf.org/nsi/2013/12/descriptions/EVTS.A-GOLE
+
+  # The default bandwidth unit.
+  defaultUnits: "mbps"
+
+  # The default bandwidth granularity.
+  defaultGranularity: 1
+
+  # Control the polling of change within the network.
+  modelAuditTimer: 60
