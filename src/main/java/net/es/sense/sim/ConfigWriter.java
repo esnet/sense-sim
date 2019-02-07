@@ -145,7 +145,7 @@ public class ConfigWriter {
     // Filter the list of ports to only those from the target network.
     List<String> lines = portConfig.stream()
             .filter(p -> networkId.equalsIgnoreCase(p.getNetworkId()))
-            .map(p -> String.format("%s \t %s \t %s \t %s \t %d \t %s \t -\n",
+            .map(p -> String.format("%s %s %s %s %d %s -\n",
             p.getType(), p.getPortName(),
             Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
             p.getLabel(), p.getBandwidth(), p.getInter()))
@@ -222,17 +222,24 @@ public class ConfigWriter {
           + "CREATE DATABASE nsa%d;\n"
           + "GRANT ALL PRIVILEGES ON DATABASE nsa%d TO %s;\n";
 
-  private static final String DB_SCRIPT ="#!/bin/bash\n" +
+  private static final String DB_SCRIPT_START =
+          "#!/bin/bash\n" +
           "set -e\n" +
           "if [ $# != 1 ]; then\n" +
           "    echo \"usage: $0 <postgres user> \"\n" +
           "    exit\n" +
           "fi\n" +
-          "\n" +
-          "psql -U $1 < db.sql\n" +
-          "export PGPASSWORD='%s'\n";
+          "echo \"Creating user account sense databases.\"\n" +
+          "psql -U $1 <<'EOF'\n";
 
-  private static final String DB_SCHEMA ="psql -U %s -d nsa%d < opennsa-schema.sql\n";
+  private static final String DB_SCRIPT_MID = "EOF;\nexport PGPASSWORD='%s'\n";
+
+  private static final String DB_SCRIPT_END =
+          "for i in {0..%d}\n" +
+          "do\n" +
+          "   echo \"Populating schema into database nsa$i.\"\n" +
+          "   psql -U %s -d nsa$i < opennsa-schema.sql\n" +
+          "done";
 
   /**
    * Write database schema for configuration.
@@ -246,25 +253,27 @@ public class ConfigWriter {
   private void writeSchema(String schema, String userId, String password, int count) throws IOException {
     // Write the script to create users and databases.
     List<String> lines = new ArrayList<>();
+
+    // Add the start of the script.
+    lines.add(DB_SCRIPT_START);
     lines.add(String.format(DB_USER, userId, password));
     for (int i = 0; i < count; i++) {
       // Create the needed users and databases.
       lines.add(String.format(DB_CREATE, i, i, userId, i, i, userId, i));
     }
-    write("db.sql", lines);
+
+    // Add the sense user password for the next set of commands.
+    lines.add(String.format(DB_SCRIPT_MID, password));
+
+    // Add the last script block to load schemas into individual database.
+    lines.add(String.format(DB_SCRIPT_END, count, userId));
+
+    // Write the script to file.
+    write("database.sh", lines);
 
     // We need to copy the source OpenNSA schema.
     String sql = read(schema, Charset.defaultCharset());
     write("opennsa-schema.sql", Arrays.asList(sql));
-
-    // Now the script to load the OpenNSA databases with schema.
-    lines.clear();
-    lines.add(String.format(DB_SCRIPT, password));
-    for (int i = 0; i < count; i++) {
-      // Create the needed users and databases.
-      lines.add(String.format(DB_SCHEMA, userId, i));
-    }
-    write("database.sh", lines);
   }
 
   /**
