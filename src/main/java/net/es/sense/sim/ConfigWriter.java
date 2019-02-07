@@ -143,11 +143,13 @@ public class ConfigWriter {
           String providerNsaId, String networkId, List<PortMap> portConfig, int count) {
 
     // Filter the list of ports to only those from the target network.
+    // OpenNSA has some wonky port name rules so we need to make sure
+    // not to violate them.
     List<String> lines = portConfig.stream()
             .filter(p -> networkId.equalsIgnoreCase(p.getNetworkId()))
             .map(p -> String.format("%s %s %s %s %d %s -\n",
-            p.getType(), p.getPortName(),
-            Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
+            p.getType(), p.getPortName().replace(":", "_"),
+            Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote().replace(":", "_"),
             p.getLabel(), p.getBandwidth(), p.getInter()))
             .collect(Collectors.toList());
 
@@ -266,7 +268,7 @@ public class ConfigWriter {
     lines.add(String.format(DB_SCRIPT_MID, password));
 
     // Add the last script block to load schemas into individual database.
-    lines.add(String.format(DB_SCRIPT_END, count, userId));
+    lines.add(String.format(DB_SCRIPT_END, count - 1, userId));
 
     // Write the script to file.
     write("database.sh", lines);
