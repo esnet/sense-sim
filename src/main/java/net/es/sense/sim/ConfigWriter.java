@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -64,16 +65,7 @@ public class ConfigWriter {
   // An OpenNSA command line for use in the startup script.
   private static final String SCRIPT = "nohup twistd -noy nsa%d.tac --pidfile nsa%d.pid &\n";
 
-  // Database configuration schema.  Each simulated network will require a
-  // dedicated SENSE RM and OpenNSA database. The SENSE-RM schema is
-  // automatically applied by the runtime, however, we have to manually apply
-  // the OpenNSA schema here as well.  A single "sense" database user will be
-  // by all SENSE RM and OpenNSA instances.
-  private static final String DB = "CREATE DATABASE sense%d;\n"
-          + "GRANT ALL PRIVILEGES ON DATABASE sense%d to %s;\n"
-          + "CREATE DATABASE nsa%d;\n"
-          + "GRANT ALL PRIVILEGES ON DATABASE nsa%d to %s;\n"
-          + "USE nsa%d;\n";
+
 
   // The OpenNSA discovery URL for populating the NSI-DDS configuration.
   private static final String PEER
@@ -219,6 +211,29 @@ public class ConfigWriter {
     write("sandbox.sh", lines);
   }
 
+  // Database configuration schema.  Each simulated network will require a
+  // dedicated SENSE RM and OpenNSA database. The SENSE-RM schema is
+  // automatically applied by the runtime, however, we have to manually apply
+  // the OpenNSA schema here as well.  A single "sense" database user will be
+  // by all SENSE RM and OpenNSA instances.
+  private static final String DB_USER = "CREATE USER %s WITH ENCRYPTED PASSWORD '%s';\n";
+  private static final String DB_CREATE = "CREATE DATABASE sense%d;\n"
+          + "GRANT ALL PRIVILEGES ON DATABASE sense%d TO %s;\n"
+          + "CREATE DATABASE nsa%d;\n"
+          + "GRANT ALL PRIVILEGES ON DATABASE nsa%d TO %s;\n";
+
+  private static final String DB_SCRIPT ="#!/bin/bash\n" +
+          "set -e\n" +
+          "if [ $# != 1 ]; then\n" +
+          "    echo \"usage: $0 <postgres user> \"\n" +
+          "    exit\n" +
+          "fi\n" +
+          "\n" +
+          "psql -U $1 < db.sql\n" +
+          "export PGPASSWORD='%s'\n";
+
+  private static final String DB_SCHEMA ="psql -U %s -d nsa%d < opennsa-schema.sql\n";
+
   /**
    * Write database schema for configuration.
    *
@@ -229,17 +244,27 @@ public class ConfigWriter {
    * @throws IOException
    */
   private void writeSchema(String schema, String userId, String password, int count) throws IOException {
-    String sql = read(schema, Charset.defaultCharset());
+    // Write the script to create users and databases.
     List<String> lines = new ArrayList<>();
-    lines.add(String.format("create user %s with encrypted password %s;\n", userId, password));
+    lines.add(String.format(DB_USER, userId, password));
     for (int i = 0; i < count; i++) {
       // Create the needed users and databases.
-      lines.add(String.format(DB, i, i, userId, i, i, userId, i));
-
-      // Apply the database schema for OpenNSA.  SENSE-NSI-RM will do it at startup.
-      lines.add(sql);
+      lines.add(String.format(DB_CREATE, i, i, userId, i, i, userId, i));
     }
     write("db.sql", lines);
+
+    // We need to copy the source OpenNSA schema.
+    String sql = read(schema, Charset.defaultCharset());
+    write("opennsa-schema.sql", Arrays.asList(sql));
+
+    // Now the script to load the OpenNSA databases with schema.
+    lines.clear();
+    lines.add(String.format(DB_SCRIPT, password));
+    for (int i = 0; i < count; i++) {
+      // Create the needed users and databases.
+      lines.add(String.format(DB_SCHEMA, userId, i));
+    }
+    write("database.sh", lines);
   }
 
   /**
