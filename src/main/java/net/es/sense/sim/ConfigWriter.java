@@ -62,11 +62,6 @@ public class ConfigWriter {
           + "from opennsa import setup\n"
           + "application = setup.createApplication('nsa%d.conf', payload=True, debug=True)\n";
 
-  // An OpenNSA command line for use in the startup script.
-  private static final String SCRIPT = "nohup twistd -noy nsa%d.tac --pidfile nsa%d.pid &\n";
-
-
-
   // The OpenNSA discovery URL for populating the NSI-DDS configuration.
   private static final String PEER
           = "<peerURL type=\"application/vnd.ogf.nsi.nsa.v1+xml\">http://localhost:%d/NSI/discovery.xml</peerURL>\n";
@@ -77,6 +72,7 @@ public class ConfigWriter {
   private final String password;
   private final String schemaFile;
   private final String rmFile;
+  private final String logFile;
   private final String outDir;
 
   /**
@@ -94,6 +90,7 @@ public class ConfigWriter {
     // Read in the SENSE-NSI-RM configuration template we will use to generate
     // the individual configurations.
     String rmTemplate = read(rmFile, Charset.defaultCharset());
+    String logTemplate = read(logFile, Charset.defaultCharset());
 
     // Get a list of NSA documents from the DDS.
     DdsController dds = new DdsController(ddsUrl);
@@ -107,7 +104,7 @@ public class ConfigWriter {
     int nsa_count = 0;
     for (NsaMap nsa : nsaMap.values()) {
       for (String networkId : nsa.getDocument().getNetworkId()) {
-        writeNSA(rmTemplate, userId, password,
+        writeNSA(rmTemplate, logTemplate, userId, password,
           nsa.getDocument().getId(), networkId, portConfig, nsa_count);
           nsa_count++;
       }
@@ -117,7 +114,7 @@ public class ConfigWriter {
     writeTac(nsa_count);
 
     // Write out the start-up script
-    writeStartup(nsa_count);
+    writeScripts(nsa_count);
 
     // Write out the database schema needed for both OpenNSA and SENSE-NSI-RM.
     writeSchema(schemaFile, userId, password, nsa_count);
@@ -131,6 +128,10 @@ public class ConfigWriter {
    * configuration files, OpenNSA runtime configuration file, and the
    * SENSE-NSI-RM configuration file.
    *
+   * OpenNSA has some wonky port name rules so we need to make sure
+   * not to violate them.  Also it automatically generates topology
+   * and NSA names so we need to match the generation algorithm.
+   *
    * @param rmTemplate
    * @param userId
    * @param password
@@ -139,17 +140,15 @@ public class ConfigWriter {
    * @param portConfig
    * @param count
    */
-  private void writeNSA(String rmTemplate, String userId, String password,
+  private void writeNSA(String rmTemplate, String logTemplate, String userId, String password,
           String providerNsaId, String networkId, List<PortMap> portConfig, int count) {
 
     // Filter the list of ports to only those from the target network.
-    // OpenNSA has some wonky port name rules so we need to make sure
-    // not to violate them.
     List<String> lines = portConfig.stream()
             .filter(p -> networkId.equalsIgnoreCase(p.getNetworkId()))
             .map(p -> String.format("%s %s %s %s %d %s -\n",
-            p.getType(), p.getPortName().replace(":", "_"),
-            Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote().replace(":", "_"),
+            p.getType(), p.getPortName(),
+            Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
             p.getLabel(), p.getBandwidth(), p.getInter()))
             .collect(Collectors.toList());
 
@@ -158,10 +157,11 @@ public class ConfigWriter {
       write("nsa" + count + ".nrm", lines);
 
       // Write out the NRM config file associated with this topology.
+      String stripped = strip_networkId(networkId);
       write("nsa" + count + ".conf",
               Lists.newArrayList(String.format(NRMCONF,
                       9000 + count, // port
-                      networkId.substring(NSI_NETWORK_URN_PREFIX.length()), // network
+                      stripped, // network
                       count, // logfile
                       count, // nrmmap
                       count, // database
@@ -169,20 +169,26 @@ public class ConfigWriter {
                       password)));
 
       // Write out the SENSE-NSI-RM configuration file for this NSA.
+      String nid = stripped.concat(":topology");
       write("sense" + count + ".yaml",
               Lists.newArrayList(String.format(rmTemplate,
                       8000 + count, // server.port
                       8000 + count, // sense.root
+                      count, // logging.config
                       count, // logging.file
                       count, // spring.datasource.url
                       userId, // spring.datasource.username
                       password, // spring.datasource.password
-                      networkId, // nsi.nsaId
+                      nid, // nsi.nsaId
                       8000 + count, // nsi.ddsUrl
-                      providerNsaId, // nsi.providerNsaId
+                      nid.concat(":nsa"), // nsi.providerNsaId
                       9000 + count, // nsi.providerConnectionURL
                       8000 + count, // nsi.requesterConnectionURL
-                      networkId)));
+                      nid))); // networkId
+
+      // Write out the SENSE-RM log configuration file.
+      write("logback" + count + ".xml",
+              Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
     }
   }
 
@@ -198,20 +204,67 @@ public class ConfigWriter {
     }
   }
 
+
+  // An OpenNSA command line for use in the startup script.
+  private static final String OPENNSA_START_SCRIPT = "#!/usr/bin/env bash\n" +
+        "\n" +
+        "for i in {0..%d}; do\n" +
+        "  if [ -f nsa$i.tac ]; then\n" +
+        "    echo \"Starting nsa$i\"\n" +
+        "    nohup twistd -noy nsa$i.tac --pidfile nsa$i.pid &\n" +
+        "  fi\n" +
+        "done\n";
+
+  private static final String OPENNSA_STOP_SCRIPT = "#!/usr/bin/env bash\n" +
+        "\n" +
+        "for i in {0..%d}; do\n" +
+        "  if [ -f nsa$i.pid ]; then\n" +
+        "    echo \"Stopping nsa$i.\"\n" +
+        "    kill -9 `cat nsa$i.pid`\n" +
+        "  fi\n" +
+        "done\n";
+
+  private static final String SENSE_START_SCRIPT = "#! /bin/bash -x\n" +
+        "\n" +
+        "export HOME=.\n" +
+        "\n" +
+        "for i in {0..%d}; do\n" +
+        "  if [ -f $HOME/config/sense$i.yaml ]; then\n" +
+        "    nohup /usr/bin/java \\\n" +
+        "        -Xmx1024m -Djava.net.preferIPv4Stack=true  \\\n" +
+        "        -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \\\n" +
+        "        -Dbasedir=\"$HOME\" \\\n" +
+        "        -Dlogback.configurationFile=\"file:$HOME/config/logback$i.xml\" \\\n" +
+        "        -XX:+StartAttachListener \\\n" +
+        "        -jar \"$HOME/rm/target/rm-0.1.0.jar\" \\\n" +
+        "        --spring.config.name=\"sense$i\" > /dev/null 2>&1 & \n" +
+        "    echo $! > sense$i.pid\n" +
+        "  fi\n" +
+        "done\n";
+
+  private static final String SENSE_STOP_SCRIPT = "#!/usr/bin/env bash\n" +
+        "\n" +
+        "for i in {0..%d}; do\n" +
+        "  if [ -f sense$i.pid ]; then\n" +
+        "    echo \"Stopping sense$i.\"\n" +
+        "    kill -9 `cat sense$i.pid`\n" +
+        "  fi\n" +
+        "done\n";
+
   /**
-   * Write the OpenNSA startup script for each NSA instance.
+   * Write the OpenNSA startup and shutdown script for each NSA instance.
    *
    * @param count
    */
-  private void writeStartup(int count) {
+  private void writeScripts(int count) {
     // Write out the start-up script
-    List<String> lines = new ArrayList<>();
-    lines.add("#!/bin/bash\n");
-    for (int i = 0; i < count; i++) {
-      lines.add(String.format(SCRIPT, i, i));
-    }
-    write("sandbox.sh", lines);
+    write("start_opennsa.sh", Lists.newArrayList(String.format(OPENNSA_START_SCRIPT, count - 1)));
+    write("stop_opennsa.sh", Lists.newArrayList(String.format(OPENNSA_STOP_SCRIPT, count - 1)));
+    write("start_sense.sh", Lists.newArrayList(String.format(SENSE_START_SCRIPT, count - 1)));
+    write("stop_sense.sh", Lists.newArrayList(String.format(SENSE_STOP_SCRIPT, count - 1)));
   }
+
+
 
   // Database configuration schema.  Each simulated network will require a
   // dedicated SENSE RM and OpenNSA database. The SENSE-RM schema is
@@ -298,7 +351,7 @@ public class ConfigWriter {
    * @param list
    * @return
    */
-  private static List<PortMap> getPortConfig(Collection<TopologyMap> list) {
+  private List<PortMap> getPortConfig(Collection<TopologyMap> list) {
     // Bidirectional ports.
     List<PortMap> biMap = new ArrayList<>();
     Map<String, PortMap> uniToBiMap = new HashMap<>();
@@ -322,7 +375,7 @@ public class ConfigWriter {
 
         pm.setPort(bi);
         pm.setPortId(stp.getId());
-        pm.setPortName(stp.getLocalId());
+        pm.setPortName(strip(stp.getLocalId()));
         pm.setType("ethernet");
         pm.setInter("em" + Integer.toString(inter++));
         pm.setBandwidth(100000);
@@ -446,14 +499,14 @@ public class ConfigWriter {
           try {
             String replaceAll = bi.getIsAlias().replaceAll("[:-]in$", "").replaceAll("[:-]out$", "");
             SimpleStp stp = new SimpleStp(replaceAll);
-            bi.setRemote(stp.getNetworkLabel() + "#" + stp.getLocalId() + "-(in|out)");
+            bi.setRemote(stp.getNetworkLabel() + "#" + strip(stp.getLocalId()) + "-(in|out)");
             log.error(bi.getRemote());
           } catch (IllegalArgumentException ex) {
             log.error("Bad stpId {} : {}", bi.getIsAlias(), ex.getLocalizedMessage());
           }
         } else {
           SimpleStp stp = new SimpleStp(match.getPortId());
-          bi.setRemote(stp.getNetworkLabel() + "#" + stp.getLocalId() + "-(in|out)");
+          bi.setRemote(stp.getNetworkLabel() + "#" + strip(stp.getLocalId()) + "-(in|out)");
         }
       }
     }
@@ -514,5 +567,26 @@ public class ConfigWriter {
   private String read(String file, Charset encoding) throws IOException {
     byte[] encoded = Files.readAllBytes(Paths.get(file));
     return new String(encoded, encoding);
+  }
+
+  public static String strip(String id) {
+    return id.replace(":", "_").replace("#", "_");
+  }
+
+  public static String strip_networkId(String id) {
+    // We have to strip the URN bit off the front and any "topology" off the end.
+    String result = id.substring(NSI_NETWORK_URN_PREFIX.length()).replaceAll(":topology$", ":");
+
+    // Now move any end topology network string after the year to the start
+    // so we don't violate the URN rules.
+    if (!result.endsWith(":")) {
+      // We need to move the string.
+      int point = result.lastIndexOf(':');
+      String start = result.substring(point + 1, result.length());
+      String end = result.substring(0, point + 1);
+      result = start + "." + end;
+    }
+
+    return result;
   }
 }

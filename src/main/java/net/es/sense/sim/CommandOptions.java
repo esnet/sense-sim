@@ -18,12 +18,14 @@ public class CommandOptions {
   // Location of the SENSE RM configuration file template.
   private static final String SENSE_RM_CONFIG_FILE = "src/main/resources/sense-rm.yaml";
   private static final String SCHEMA_FILE = "src/main/resources/schema.sql";
+  private static final String SENSE_RM_LOG_FILE = "src/main/resources/logback.xml";
 
   public static final String DDS = "dds";
   public static final String USER = "user";
   public static final String PASSWORD = "pwd";
   public static final String SCHEMA = "schema";
   public static final String RM = "rm";
+  public static final String LOG = "log";
   public static final String OUT = "out";
 
   private CommandLine clp;
@@ -83,6 +85,10 @@ public class CommandOptions {
     Option out = new Option(OUT, true, "Directory to write genrated files.");
     rm.setOptionalArg(true);
     options.addOption(out);
+
+    Option log = new Option(LOG, true, "Location of SENSE-RM log file template.");
+    rm.setOptionalArg(true);
+    options.addOption(log);
 
     return options;
   }
@@ -151,5 +157,16 @@ public class CommandOptions {
       return clp.getOptionValue(OUT);
     }
     return "";
+  }
+
+  /**
+   *
+   * @return
+   */
+  public String getLog() {
+    if (clp.hasOption(LOG)) {
+      return clp.getOptionValue(LOG);
+    }
+    return SENSE_RM_LOG_FILE;
   }
 }

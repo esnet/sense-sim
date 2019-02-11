@@ -16,7 +16,7 @@ springfox.documentation.swagger.v1.path: /v1/api-docs
 
 # Configuration for logging subsystem.
 logging:
-  config: file:./config/logback.xml
+  config: file:./config/logback%d.xml
   level:
     ROOT: INFO
     org.springframework: INFO

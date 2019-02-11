@@ -41,6 +41,7 @@ public class Generate {
             .rmFile(options.getRm())
             .ddsUrl(options.getDdsUrl())
             .outDir(options.getOut())
+            .logFile(options.getLog())
             .build();
     cw.write();
   }
