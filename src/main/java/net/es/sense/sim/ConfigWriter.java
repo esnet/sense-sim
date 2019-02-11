@@ -104,9 +104,10 @@ public class ConfigWriter {
     int nsa_count = 0;
     for (NsaMap nsa : nsaMap.values()) {
       for (String networkId : nsa.getDocument().getNetworkId()) {
-        writeNSA(rmTemplate, logTemplate, userId, password,
-          nsa.getDocument().getId(), networkId, portConfig, nsa_count);
+        if (writeNSA(rmTemplate, logTemplate, userId, password,
+            nsa.getDocument().getId(), networkId, portConfig, nsa_count)) {
           nsa_count++;
+        }
       }
     }
 
@@ -140,56 +141,64 @@ public class ConfigWriter {
    * @param portConfig
    * @param count
    */
-  private void writeNSA(String rmTemplate, String logTemplate, String userId, String password,
+  private boolean writeNSA(String rmTemplate, String logTemplate, String userId, String password,
           String providerNsaId, String networkId, List<PortMap> portConfig, int count) {
 
     // Filter the list of ports to only those from the target network.
     List<String> lines = portConfig.stream()
             .filter(p -> networkId.equalsIgnoreCase(p.getNetworkId()))
             .map(p -> String.format("%s %s %s %s %d %s -\n",
-            p.getType(), p.getPortName(),
-            Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
-            p.getLabel(), p.getBandwidth(), p.getInter()))
+              p.getType(),
+              p.getPortName(),
+              Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
+              p.getLabel(),
+              p.getBandwidth(),
+              p.getInter()))
             .collect(Collectors.toList());
 
-    if (!lines.isEmpty()) {
-      // Write out the OpenNSA port configuration file for this network topology.
-      write("nsa" + count + ".nrm", lines);
-
-      // Write out the NRM config file associated with this topology.
-      String stripped = strip_networkId(networkId);
-      write("nsa" + count + ".conf",
-              Lists.newArrayList(String.format(NRMCONF,
-                      9000 + count, // port
-                      stripped, // network
-                      count, // logfile
-                      count, // nrmmap
-                      count, // database
-                      userId,
-                      password)));
-
-      // Write out the SENSE-NSI-RM configuration file for this NSA.
-      String nid = stripped.concat(":topology");
-      write("sense" + count + ".yaml",
-              Lists.newArrayList(String.format(rmTemplate,
-                      8000 + count, // server.port
-                      8000 + count, // sense.root
-                      count, // logging.config
-                      count, // logging.file
-                      count, // spring.datasource.url
-                      userId, // spring.datasource.username
-                      password, // spring.datasource.password
-                      nid, // nsi.nsaId
-                      8000 + count, // nsi.ddsUrl
-                      nid.concat(":nsa"), // nsi.providerNsaId
-                      9000 + count, // nsi.providerConnectionURL
-                      8000 + count, // nsi.requesterConnectionURL
-                      nid))); // networkId
-
-      // Write out the SENSE-RM log configuration file.
-      write("logback" + count + ".xml",
-              Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
+    if (lines.isEmpty()) {
+      log.error("writeNSA: skipping providerId {}, networkId = {}", providerNsaId, networkId);
+      return false;
     }
+
+    // Write out the OpenNSA port configuration file for this network topology.
+    write("nsa" + count + ".nrm", lines);
+
+    // Write out the NRM config file associated with this topology.
+    String stripped = strip_networkId(networkId);
+    write("nsa" + count + ".conf",
+            Lists.newArrayList(String.format(NRMCONF,
+                    9000 + count, // port
+                    stripped, // network
+                    count, // logfile
+                    count, // nrmmap
+                    count, // database
+                    userId,
+                    password)));
+
+    // Write out the SENSE-NSI-RM configuration file for this NSA.
+    String nid = stripped.concat(":topology");
+    write("sense" + count + ".yaml",
+            Lists.newArrayList(String.format(rmTemplate,
+                    8000 + count, // server.port
+                    8000 + count, // sense.root
+                    count, // logging.config
+                    count, // logging.file
+                    count, // spring.datasource.url
+                    userId, // spring.datasource.username
+                    password, // spring.datasource.password
+                    nid, // nsi.nsaId
+                    8000 + count, // nsi.ddsUrl
+                    nid.concat(":nsa"), // nsi.providerNsaId
+                    9000 + count, // nsi.providerConnectionURL
+                    8000 + count, // nsi.requesterConnectionURL
+                    nid))); // networkId
+
+    // Write out the SENSE-RM log configuration file.
+    write("logback" + count + ".xml",
+            Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
+
+    return true;
   }
 
   /**
