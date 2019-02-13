@@ -11,7 +11,7 @@ for i in `ls $HOME/config/sense*.yaml`; do
         -Xmx1024m -Djava.net.preferIPv4Stack=true  \
         -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \
         -Dbasedir=$HOME \
-        -Dlogback.configurationFile=file:$path.xml \
+        -Dlogging.config=file:$path-logback.xml \
         -XX:+StartAttachListener \
         -jar $HOME/rm/target/rm-0.1.0.jar \
         --spring.config.name=$root > /dev/null 2>&1 &

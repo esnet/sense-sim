@@ -72,6 +72,7 @@ public class ConfigWriter {
   private final String rmFile;
   private final String logFile;
   private final String outDir;
+  private final String address;
 
   /**
    * This is the main control loop for generating the needed configuration files.
@@ -101,11 +102,11 @@ public class ConfigWriter {
     // Write the SENSE-NSI-RM and OpenNSA configuration files for each network.
     int nsa_count = 0;
     for (NsaMap nsa : nsaMap.values()) {
-      log.error("Processing NSA {}", nsa.nsaId);
+      log.info("Processing NSA {}", nsa.nsaId);
       for (String networkId : nsa.getDocument().getNetworkId()) {
-        log.error(">>> Processing NSA {}, topology {}", nsa.nsaId, networkId);
-        if (writeNSA(rmTemplate, logTemplate, userId, password,
-            nsa.getDocument().getId(), networkId, portConfig, nsa_count)) {
+        log.info(">>> Processing NSA {}, topology {}", nsa.nsaId, networkId);
+        if (writeNSA(rmTemplate, logTemplate, nsa.getDocument().getId(),
+                networkId, portConfig, nsa_count)) {
           nsa_count++;
         }
       }
@@ -118,7 +119,7 @@ public class ConfigWriter {
     writeScripts();
 
     // Write out the database schema needed for both OpenNSA and SENSE-NSI-RM.
-    writeSchema(schemaFile, userId, password, nsa_count);
+    writeSchema(nsa_count);
 
     // Write out the peer discovery information to configure the DDS.
     writeDiscovery(nsa_count);
@@ -141,8 +142,8 @@ public class ConfigWriter {
    * @param portConfig
    * @param count
    */
-  private boolean writeNSA(String rmTemplate, String logTemplate, String userId, String password,
-          String providerNsaId, String networkId, List<PortMap> portConfig, int count) {
+  private boolean writeNSA(String rmTemplate, String logTemplate, String providerNsaId,
+          String networkId, List<PortMap> portConfig, int count) {
 
     // Filter the list of ports to only those from the target network.
     List<String> lines = portConfig.stream()
@@ -157,7 +158,7 @@ public class ConfigWriter {
             .collect(Collectors.toList());
 
     if (lines.isEmpty()) {
-      log.error("writeNSA: skipping providerId {}, networkId = {}", providerNsaId, networkId);
+      log.error("writeNSA: no valid ports for providerId {}, networkId = {}", providerNsaId, networkId);
       return false;
     }
 
@@ -181,7 +182,9 @@ public class ConfigWriter {
     String nsa = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":nsa");
     write("sense" + count + ".yaml",
             Lists.newArrayList(String.format(rmTemplate,
+                    address, //server.address
                     8000 + count, // server.port
+                    address, // sense.root
                     8000 + count, // sense.root
                     count, // logging.config
                     count, // logging.file
@@ -189,14 +192,16 @@ public class ConfigWriter {
                     userId, // spring.datasource.username
                     password, // spring.datasource.password
                     nid, // nsi.nsaId
-                    8000 + count, // nsi.ddsUrl
+                    address, // nsi.ddsUrl address
+                    8000 + count, // nsi.ddsUrl port
                     nsa, // nsi.providerNsaId
                     9000 + count, // nsi.providerConnectionURL
-                    8000 + count, // nsi.requesterConnectionURL
+                    address, // nsi.requesterConnectionURL address
+                    8000 + count, // nsi.requesterConnectionURL port
                     nid))); // networkId
 
     // Write out the SENSE-RM log configuration file.
-    write("sense" + count + ".xml",
+    write("sense" + count + "-logback.xml",
             Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
 
     return true;
@@ -250,7 +255,7 @@ public class ConfigWriter {
           "        -Xmx1024m -Djava.net.preferIPv4Stack=true  \\\n" +
           "        -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \\\n" +
           "        -Dbasedir=$HOME \\\n" +
-          "        -Dlogback.configurationFile=file:$path.xml \\\n" +
+          "        -Dlogging.config=file:$path-logback.xml \\\n" +
           "        -XX:+StartAttachListener \\\n" +
           "        -jar $HOME/rm/target/rm-0.1.0.jar \\\n" +
           "        --spring.config.name=$root > /dev/null 2>&1 &\n" +
@@ -322,7 +327,7 @@ public class ConfigWriter {
    * @param count
    * @throws IOException
    */
-  private void writeSchema(String schema, String userId, String password, int count) throws IOException {
+  private void writeSchema(int count) throws IOException {
     // Write the script to create users and databases.
     List<String> lines = new ArrayList<>();
 
@@ -344,7 +349,7 @@ public class ConfigWriter {
     write("database.sh", lines);
 
     // We need to copy the source OpenNSA schema.
-    String sql = read(schema, Charset.defaultCharset());
+    String sql = read(schemaFile, Charset.defaultCharset());
     write("opennsa-schema.sql", Arrays.asList(sql));
   }
 

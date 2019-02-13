@@ -1,12 +1,12 @@
 # Configuration information for the internal HTTP server.
-server.address: localhost
+server.address: %s
 server.port: %d
 server.contextPath: /
 cxf.path: /nsi
 
 # The SENSE RM logic needs to know local context and driver to load.
 sense:
-  root: http://localhost:%d/
+  root: http://%s:%d/
   proxy:
   driver: net.es.sense.rm.driver.nsi.NsiDriver
 
@@ -16,7 +16,7 @@ springfox.documentation.swagger.v1.path: /v1/api-docs
 
 # Configuration for logging subsystem.
 logging:
-  config: file:./config/sense%d.xml
+  config: file:./config/sense%d-logback.xml
   level:
     ROOT: INFO
     org.springframework: INFO
@@ -51,7 +51,7 @@ nsi:
   #########################################
 
   # The DDS notification endpoint we will expose for callbacks.
-  ddsUrl: http://localhost:%d/api/dds/v1
+  ddsUrl: http://%s:%d/api/dds/v1
 
   # How often (in seconds) we query our remote subscription to see if it is still valid.
   ddsAuditTimer: 600
@@ -75,7 +75,7 @@ nsi:
   providerConnectionURL: "http://localhost:%d/NSI/services/CS2"
 
   # Our requester connection service endpoint.
-  requesterConnectionURL: "http://localhost:%d/nsi/nsi-v2/ConnectionServiceRequester"
+  requesterConnectionURL: "http://%s:%d/nsi/nsi-v2/ConnectionServiceRequester"
 
   # How often we audit our associated NSA for new connections.
   connectionAuditTimer: 50

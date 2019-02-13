@@ -19,6 +19,7 @@ public class CommandOptions {
   private static final String SENSE_RM_CONFIG_FILE = "src/main/resources/sense-rm.yaml";
   private static final String SCHEMA_FILE = "src/main/resources/schema.sql";
   private static final String SENSE_RM_LOG_FILE = "src/main/resources/logback.xml";
+  private static final String SENSE_ADDRESS = "localhost";
 
   public static final String DDS = "dds";
   public static final String USER = "user";
@@ -27,6 +28,7 @@ public class CommandOptions {
   public static final String RM = "rm";
   public static final String LOG = "log";
   public static final String OUT = "out";
+  public static final String ADDRESS = "addr";
 
   private CommandLine clp;
   private final Options commandOptions;
@@ -86,9 +88,13 @@ public class CommandOptions {
     rm.setOptionalArg(true);
     options.addOption(out);
 
-    Option log = new Option(LOG, true, "Location of SENSE-RM log file template.");
+    Option logfile = new Option(LOG, true, "Location of SENSE-RM log file template.");
     rm.setOptionalArg(true);
-    options.addOption(log);
+    options.addOption(logfile);
+
+    Option addr = new Option(ADDRESS, true, "Address to bind SENSE-RM REST endpoint.");
+    rm.setOptionalArg(true);
+    options.addOption(addr);
 
     return options;
   }
@@ -168,5 +174,16 @@ public class CommandOptions {
       return clp.getOptionValue(LOG);
     }
     return SENSE_RM_LOG_FILE;
+  }
+
+  /**
+   *
+   * @return
+   */
+  public String getAddress() {
+    if (clp.hasOption(ADDRESS)) {
+      return clp.getOptionValue(ADDRESS);
+    }
+    return SENSE_ADDRESS;
   }
 }
