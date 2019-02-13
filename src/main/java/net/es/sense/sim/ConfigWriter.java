@@ -27,10 +27,8 @@ import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
 import net.es.nsi.common.Nml;
 import net.es.nsi.common.SimpleLabel;
-import static net.es.nsi.common.SimpleLabel.NSI_EVTS_LABEL_TYPE;
 import net.es.nsi.common.SimpleLabels;
 import net.es.nsi.common.SimpleStp;
-import static net.es.nsi.common.SimpleStp.NSI_NETWORK_URN_PREFIX;
 import net.es.nsi.common.jaxb.nml.NmlBidirectionalPortType;
 import net.es.nsi.common.jaxb.nml.NmlPortGroupType;
 import net.es.nsi.common.jaxb.nml.NmlPortType;
@@ -115,7 +113,7 @@ public class ConfigWriter {
     writeTac(nsa_count);
 
     // Write out the start-up script
-    writeScripts(nsa_count);
+    writeScripts();
 
     // Write out the database schema needed for both OpenNSA and SENSE-NSI-RM.
     writeSchema(schemaFile, userId, password, nsa_count);
@@ -177,7 +175,8 @@ public class ConfigWriter {
                     password)));
 
     // Write out the SENSE-NSI-RM configuration file for this NSA.
-    String nid = stripped.concat(":topology");
+    String nid = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":topology");
+    String nsa = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":nsa");
     write("sense" + count + ".yaml",
             Lists.newArrayList(String.format(rmTemplate,
                     8000 + count, // server.port
@@ -189,13 +188,13 @@ public class ConfigWriter {
                     password, // spring.datasource.password
                     nid, // nsi.nsaId
                     8000 + count, // nsi.ddsUrl
-                    nid.concat(":nsa"), // nsi.providerNsaId
+                    nsa, // nsi.providerNsaId
                     9000 + count, // nsi.providerConnectionURL
                     8000 + count, // nsi.requesterConnectionURL
                     nid))); // networkId
 
     // Write out the SENSE-RM log configuration file.
-    write("logback" + count + ".xml",
+    write("sense" + count + ".xml",
             Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
 
     return true;
@@ -215,62 +214,69 @@ public class ConfigWriter {
 
 
   // An OpenNSA command line for use in the startup script.
-  private static final String OPENNSA_START_SCRIPT = "#!/usr/bin/env bash\n" +
-        "\n" +
-        "for i in {0..%d}; do\n" +
-        "  if [ -f nsa$i.tac ]; then\n" +
-        "    echo \"Starting nsa$i\"\n" +
-        "    nohup twistd -noy nsa$i.tac --pidfile nsa$i.pid &\n" +
+  private static final String OPENNSA_START_SCRIPT =
+          "#!/bin/bash\n" +
+          "\n" +
+          "for i in `ls nsa*.tac`; do\n" +
+          "  if [ -f $i ]; then\n" +
+          "    echo \"Starting $i with pid file ${i%.*}.pid\"\n" +
+          "    nohup twistd -noy $i --pidfile ${i%.*}.pid &\n" +
+          "  fi\n" +
+          "done\n";
+
+  private static final String OPENNSA_STOP_SCRIPT =
+        "#!/bin/bash\n" +
+        "       \n" +
+        "for i in `ls nsa*.pid`; do\n" +
+        "if [ -f $i ]; then\n" +
+        "  echo \"Stopping $i.\"\n" +
+        "  kill -9 `cat $i`\n" +
         "  fi\n" +
         "done\n";
 
-  private static final String OPENNSA_STOP_SCRIPT = "#!/usr/bin/env bash\n" +
-        "\n" +
-        "for i in {0..%d}; do\n" +
-        "  if [ -f nsa$i.pid ]; then\n" +
-        "    echo \"Stopping nsa$i.\"\n" +
-        "    kill -9 `cat nsa$i.pid`\n" +
-        "  fi\n" +
-        "done\n";
+  private static final String SENSE_START_SCRIPT =
+          "#! /bin/bash\n" +
+          "\n" +
+          "export HOME=.\n" +
+          "\n" +
+          "for i in `ls $HOME/config/sense*.yaml`; do\n" +
+          "  if [ -f $i ]; then\n" +
+          "    path=${i%.*}\n" +
+          "    root=${path##*/}\n" +
+          "\n" +
+          "    nohup /usr/bin/java \\\n" +
+          "        -Xmx1024m -Djava.net.preferIPv4Stack=true  \\\n" +
+          "        -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \\\n" +
+          "        -Dbasedir=\"$HOME\" \\\n" +
+          "        -Dlogback.configurationFile=\"file:$path.xml\" \\\n" +
+          "        -XX:+StartAttachListener \\\n" +
+          "        -jar \"$HOME/rm/target/rm-0.1.0.jar\" \\\n" +
+          "        --spring.config.name=\"$root\" > /dev/null 2>&1 &\n" +
+          "    echo $! > $root.pid\n" +
+          "  fi\n" +
+          "done\n";
 
-  private static final String SENSE_START_SCRIPT = "#! /bin/bash -x\n" +
-        "\n" +
-        "export HOME=.\n" +
-        "\n" +
-        "for i in {0..%d}; do\n" +
-        "  if [ -f $HOME/config/sense$i.yaml ]; then\n" +
-        "    nohup /usr/bin/java \\\n" +
-        "        -Xmx1024m -Djava.net.preferIPv4Stack=true  \\\n" +
-        "        -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \\\n" +
-        "        -Dbasedir=\"$HOME\" \\\n" +
-        "        -Dlogback.configurationFile=\"file:$HOME/config/logback$i.xml\" \\\n" +
-        "        -XX:+StartAttachListener \\\n" +
-        "        -jar \"$HOME/rm/target/rm-0.1.0.jar\" \\\n" +
-        "        --spring.config.name=\"sense$i\" > /dev/null 2>&1 & \n" +
-        "    echo $! > sense$i.pid\n" +
-        "  fi\n" +
-        "done\n";
-
-  private static final String SENSE_STOP_SCRIPT = "#!/usr/bin/env bash\n" +
-        "\n" +
-        "for i in {0..%d}; do\n" +
-        "  if [ -f sense$i.pid ]; then\n" +
-        "    echo \"Stopping sense$i.\"\n" +
-        "    kill -9 `cat sense$i.pid`\n" +
-        "  fi\n" +
-        "done\n";
+  private static final String SENSE_STOP_SCRIPT =
+          "#!/bin/bash\n" +
+          "\n" +
+          "for i in `ls sense*.pid`; do\n" +
+          "  if [ -f $i ]; then\n" +
+          "    echo \"Stopping $i.\"\n" +
+          "    kill -9 `cat $i`\n" +
+          "  fi\n" +
+          "done\n";
 
   /**
    * Write the OpenNSA startup and shutdown script for each NSA instance.
    *
    * @param count
    */
-  private void writeScripts(int count) {
+  private void writeScripts() {
     // Write out the start-up script
-    write("start_opennsa.sh", Lists.newArrayList(String.format(OPENNSA_START_SCRIPT, count - 1)));
-    write("stop_opennsa.sh", Lists.newArrayList(String.format(OPENNSA_STOP_SCRIPT, count - 1)));
-    write("start_sense.sh", Lists.newArrayList(String.format(SENSE_START_SCRIPT, count - 1)));
-    write("stop_sense.sh", Lists.newArrayList(String.format(SENSE_STOP_SCRIPT, count - 1)));
+    write("opennsa_start.sh", Lists.newArrayList(OPENNSA_START_SCRIPT));
+    write("opennsa_stop.sh", Lists.newArrayList(OPENNSA_STOP_SCRIPT));
+    write("sense_start.sh", Lists.newArrayList(SENSE_START_SCRIPT));
+    write("sense_stop.sh", Lists.newArrayList(SENSE_STOP_SCRIPT));
   }
 
 
@@ -430,7 +436,7 @@ public class ConfigWriter {
                   (SimpleLabel.NSI_EVTS_LABEL_TYPE.contentEquals(label.get().getType()) &&
                   Strings.isNullOrEmpty(label.get().getValue()))) {
             // Invalid label sequence for OpenNSA so fudge it.
-            SimpleLabel newLabel = new SimpleLabel(NSI_EVTS_LABEL_TYPE, "0");
+            SimpleLabel newLabel = new SimpleLabel(SimpleLabel.NSI_EVTS_LABEL_TYPE, "0");
             Set<SimpleLabel> labelSet = new HashSet<>();
             labelSet.add(newLabel);
             stp.setLabels(labelSet);
@@ -475,7 +481,7 @@ public class ConfigWriter {
                   (SimpleLabel.NSI_EVTS_LABEL_TYPE.contentEquals(label.get().getType()) &&
                   Strings.isNullOrEmpty(label.get().getValue()))) {
             // Invalid label sequence for OpenNSA so fudge it.
-            SimpleLabel newLabel = new SimpleLabel(NSI_EVTS_LABEL_TYPE, "0");
+            SimpleLabel newLabel = new SimpleLabel(SimpleLabel.NSI_EVTS_LABEL_TYPE, "0");
             Set<SimpleLabel> labelSet = new HashSet<>();
             labelSet.add(newLabel);
             stp.setLabels(labelSet);
@@ -584,15 +590,18 @@ public class ConfigWriter {
 
   public static String strip_networkId(String id) {
     // We have to strip the URN bit off the front and any "topology" off the end.
-    String result = id.substring(NSI_NETWORK_URN_PREFIX.length()).replaceAll(":topology$", ":");
+    String result = id.substring(SimpleStp.NSI_NETWORK_URN_PREFIX.length()).replaceAll(":topology$", ":");
 
     // Now move any end topology network string after the year to the start
     // so we don't violate the URN rules.
-    if (!result.endsWith(":")) {
+    if (result.endsWith(":")) {
+      int point = result.lastIndexOf(':');
+      result = result.substring(0, point);
+    } else {
       // We need to move the string.
       int point = result.lastIndexOf(':');
       String start = result.substring(point + 1, result.length());
-      String end = result.substring(0, point + 1);
+      String end = result.substring(0, point);
       result = start + "." + end;
     }
 
