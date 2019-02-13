@@ -101,7 +101,9 @@ public class ConfigWriter {
     // Write the SENSE-NSI-RM and OpenNSA configuration files for each network.
     int nsa_count = 0;
     for (NsaMap nsa : nsaMap.values()) {
+      log.error("Processing NSA {}", nsa.nsaId);
       for (String networkId : nsa.getDocument().getNetworkId()) {
+        log.error(">>> Processing NSA {}, topology {}", nsa.nsaId, networkId);
         if (writeNSA(rmTemplate, logTemplate, userId, password,
             nsa.getDocument().getId(), networkId, portConfig, nsa_count)) {
           nsa_count++;
@@ -247,14 +249,14 @@ public class ConfigWriter {
           "    nohup /usr/bin/java \\\n" +
           "        -Xmx1024m -Djava.net.preferIPv4Stack=true  \\\n" +
           "        -Dcom.sun.xml.bind.v2.runtime.JAXBContextImpl.fastBoot=true \\\n" +
-          "        -Dbasedir=\"$HOME\" \\\n" +
-          "        -Dlogback.configurationFile=\"file:$path.xml\" \\\n" +
+          "        -Dbasedir=$HOME \\\n" +
+          "        -Dlogback.configurationFile=file:$path.xml \\\n" +
           "        -XX:+StartAttachListener \\\n" +
-          "        -jar \"$HOME/rm/target/rm-0.1.0.jar\" \\\n" +
-          "        --spring.config.name=\"$root\" > /dev/null 2>&1 &\n" +
+          "        -jar $HOME/rm/target/rm-0.1.0.jar \\\n" +
+          "        --spring.config.name=$root > /dev/null 2>&1 &\n" +
           "    echo $! > $root.pid\n" +
           "  fi\n" +
-          "done\n";
+          "done";
 
   private static final String SENSE_STOP_SCRIPT =
           "#!/bin/bash\n" +

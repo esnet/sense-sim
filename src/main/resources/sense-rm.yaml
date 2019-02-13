@@ -72,7 +72,7 @@ nsi:
 
   # The associated NSA we will connect to for connection services.
   providerNsaId: "%s"
-  providerConnectionURL: "https://localhost:%d/NSI/services/CS2"
+  providerConnectionURL: "http://localhost:%d/NSI/services/CS2"
 
   # Our requester connection service endpoint.
   requesterConnectionURL: "http://localhost:%d/nsi/nsi-v2/ConnectionServiceRequester"
