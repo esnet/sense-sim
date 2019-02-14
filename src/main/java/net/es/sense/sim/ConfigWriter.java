@@ -166,7 +166,7 @@ public class ConfigWriter {
     write("nsa" + count + ".nrm", lines);
 
     // Write out the NRM config file associated with this topology.
-    String stripped = strip_networkId(networkId);
+    String stripped = strip_networkUrn(networkId);
     write("nsa" + count + ".conf",
             Lists.newArrayList(String.format(NRMCONF,
                     9000 + count, // port
@@ -521,14 +521,14 @@ public class ConfigWriter {
           try {
             String replaceAll = bi.getIsAlias().replaceAll("[:-]in$", "").replaceAll("[:-]out$", "");
             SimpleStp stp = new SimpleStp(replaceAll);
-            bi.setRemote(stp.getNetworkLabel() + "#" + strip(stp.getLocalId()) + "-(in|out)");
+            bi.setRemote(strip_networkUrn(stp.getNetworkId()) + ":topology#" + strip(stp.getLocalId()) + "-(in|out)");
             log.error(bi.getRemote());
           } catch (IllegalArgumentException ex) {
             log.error("Bad stpId {} : {}", bi.getIsAlias(), ex.getLocalizedMessage());
           }
         } else {
           SimpleStp stp = new SimpleStp(match.getPortId());
-          bi.setRemote(stp.getNetworkLabel() + "#" + strip(stp.getLocalId()) + "-(in|out)");
+          bi.setRemote(strip_networkUrn(stp.getNetworkId()) + ":topology#" + strip(stp.getLocalId()) + "-(in|out)");
         }
       }
     }
@@ -595,9 +595,14 @@ public class ConfigWriter {
     return id.replace(":", "_").replace("#", "_");
   }
 
-  public static String strip_networkId(String id) {
+  public static String strip_networkUrn(String id) {
     // We have to strip the URN bit off the front and any "topology" off the end.
-    String result = id.substring(SimpleStp.NSI_NETWORK_URN_PREFIX.length()).replaceAll(":topology$", ":");
+    return strip_networkLocal(id.substring(SimpleStp.NSI_NETWORK_URN_PREFIX.length()));
+  }
+
+  public static String strip_networkLocal(String id) {
+    // We have to strip the URN bit off the front and any "topology" off the end.
+    String result = id.replaceAll(":topology$", ":");
 
     // Now move any end topology network string after the year to the start
     // so we don't violate the URN rules.

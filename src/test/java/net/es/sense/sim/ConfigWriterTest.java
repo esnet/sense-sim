@@ -23,10 +23,10 @@ public class ConfigWriterTest {
   @Test
   public void testNetworkId() throws Exception {
     assertEquals("netherlight7.surfnet.nl:1990",
-            ConfigWriter.strip_networkId("urn:ogf:network:surfnet.nl:1990:netherlight7"));
+            ConfigWriter.strip_networkUrn("urn:ogf:network:surfnet.nl:1990:netherlight7"));
     assertEquals("snvaca.pacificwave.net:2016",
-            ConfigWriter.strip_networkId("urn:ogf:network:snvaca.pacificwave.net:2016:topology"));
+            ConfigWriter.strip_networkUrn("urn:ogf:network:snvaca.pacificwave.net:2016:topology"));
     assertEquals("tb.es.net:2013",
-            ConfigWriter.strip_networkId("urn:ogf:network:tb.es.net:2013:"));
+            ConfigWriter.strip_networkUrn("urn:ogf:network:tb.es.net:2013:"));
   }
 }

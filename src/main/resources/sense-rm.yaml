@@ -78,7 +78,7 @@ nsi:
   requesterConnectionURL: "http://%s:%d/nsi/nsi-v2/ConnectionServiceRequester"
 
   # How often we audit our associated NSA for new connections.
-  connectionAuditTimer: 50
+  connectionAuditTimer: 30
 
   #########################################
   # NML/MRML generation configuration.    #
@@ -90,6 +90,9 @@ nsi:
   # The default serviceDefinition if one is not specified.
   defaultServiceType: http://services.ogf.org/nsi/2013/12/descriptions/EVTS.A-GOLE
 
+  # The default bandwidth type.
+  defaultType: "bestEffort"
+
   # The default bandwidth unit.
   defaultUnits: "mbps"
 
@@ -98,3 +101,6 @@ nsi:
 
   # Control the polling of change within the network.
   modelAuditTimer: 60
+
+  # How small should we prune the model database.
+  modelPruneSize: 10
