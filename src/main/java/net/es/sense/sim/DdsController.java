@@ -2,12 +2,14 @@ package net.es.sense.sim;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.mail.MessagingException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import javax.xml.bind.JAXBException;
+import javax.xml.datatype.DatatypeConfigurationException;
 import lombok.extern.slf4j.Slf4j;
 import net.es.nsi.common.constants.Nsi;
 import net.es.nsi.common.jaxb.NmlParser;
@@ -15,6 +17,7 @@ import net.es.nsi.common.jaxb.NsaParser;
 import net.es.nsi.common.jaxb.nml.NmlTopologyType;
 import net.es.nsi.common.jaxb.nsa.NsaType;
 import net.es.nsi.common.util.ContentTransferEncoding;
+import net.es.nsi.common.util.XmlUtilities;
 import net.es.nsi.dds.lib.client.DdsClient;
 import net.es.nsi.dds.lib.client.DocumentResult;
 import net.es.nsi.dds.lib.client.DocumentsResult;
@@ -55,27 +58,40 @@ public class DdsController {
       throw new NotFoundException("DDS return status " + documents.getStatus());
     }
 
+    Date now = new Date();
     for (DocumentType d : documents.getDocuments()) {
-        ContentType content = d.getContent();
-        try {
-          NsaType nsa = NsaParser.getInstance().readDocument(
-                  net.es.nsi.common.util.ContentType.decode(
-                          content.getContentType(),
-                          ContentTransferEncoding.decode(
-                                  content.getContentTransferEncoding(),
-                                  content.getValue()
-                          )
-                  )
-          );
-
-          NsaMap holder = new NsaMap();
-          holder.setNsaId(nsa.getId());
-          holder.setDocument(nsa);
-          map.put(nsa.getId(), holder);
-
-        } catch (IOException | MessagingException | JAXBException ex) {
-          throw new IOException("Encountered exception processing document " + d.getHref(), ex);
+      // Do not process the document if it has already expired.
+      try {
+        Date date = XmlUtilities.xmlGregorianCalendarToDate(d.getExpires());
+        if (date.before(now)) {
+          log.error("NSA document {} has expired.", d.getId());
+          continue;
         }
+      } catch (DatatypeConfigurationException ex) {
+        log.error("NSA document {} has invalid expires date.", d.getId());
+        continue;
+      }
+
+      ContentType content = d.getContent();
+      try {
+        NsaType nsa = NsaParser.getInstance().readDocument(
+                net.es.nsi.common.util.ContentType.decode(
+                        content.getContentType(),
+                        ContentTransferEncoding.decode(
+                                content.getContentTransferEncoding(),
+                                content.getValue()
+                        )
+                )
+        );
+
+        NsaMap holder = new NsaMap();
+        holder.setNsaId(nsa.getId());
+        holder.setDocument(nsa);
+        map.put(nsa.getId(), holder);
+
+      } catch (IOException | MessagingException | JAXBException ex) {
+        throw new IOException("Encountered exception processing document " + d.getHref(), ex);
+      }
     }
 
     return map;
@@ -94,6 +110,7 @@ public class DdsController {
     Map<String, TopologyMap> map = new ConcurrentHashMap<>();
 
     // Iterate through each NSA.
+    Date now = new Date();
     for (NsaMap nsa : list) {
       // We need to retrieve each NML topology document associated with a networkid.
       for (String networkId : nsa.getDocument().getNetworkId()) {
@@ -104,6 +121,12 @@ public class DdsController {
         } else switch (document.getStatus()) {
           case OK:
             try {
+              Date date = XmlUtilities.xmlGregorianCalendarToDate(document.getDocument().getExpires());
+              if (date.before(now)) {
+                log.error("Topology document {} has expired.", document.getDocument().getId());
+                continue;
+              }
+
               // We got a document so decode and parse into a NML structure.
               ContentType content = document.getDocument().getContent();
               NmlTopologyType topology = NmlParser.getInstance().readDocument(
@@ -121,6 +144,8 @@ public class DdsController {
               holder.setNetworkId(networkId);
               holder.setDocument(topology);
               map.put(topology.getId(), holder);
+            } catch (DatatypeConfigurationException ex) {
+                log.error("Topology document {} has invalid expires date.", document.getDocument().getId());
             } catch (IOException | MessagingException | JAXBException ex) {
               throw new IOException("Encountered exception processing networkId " + networkId, ex);
             }

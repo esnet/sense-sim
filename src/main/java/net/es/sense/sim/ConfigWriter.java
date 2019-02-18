@@ -14,6 +14,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -29,7 +30,9 @@ import net.es.nsi.common.Nml;
 import net.es.nsi.common.SimpleLabel;
 import net.es.nsi.common.SimpleLabels;
 import net.es.nsi.common.SimpleStp;
+import static net.es.nsi.common.SimpleStp.NSI_VLAN_LABEL_URN;
 import net.es.nsi.common.jaxb.nml.NmlBidirectionalPortType;
+import net.es.nsi.common.jaxb.nml.NmlLabelGroupType;
 import net.es.nsi.common.jaxb.nml.NmlPortGroupType;
 import net.es.nsi.common.jaxb.nml.NmlPortType;
 
@@ -71,6 +74,7 @@ public class ConfigWriter {
   private final String schemaFile;
   private final String rmFile;
   private final String logFile;
+  private final String peersFile;
   private final String outDir;
   private final String address;
 
@@ -91,6 +95,8 @@ public class ConfigWriter {
     String rmTemplate = read(rmFile, Charset.defaultCharset());
     String logTemplate = read(logFile, Charset.defaultCharset());
 
+    Map<String, Peer> peers = Peers.getPeers(peersFile);
+
     // Get a list of NSA documents from the DDS.
     DdsController dds = new DdsController(ddsUrl);
     Map<String, NsaMap> nsaMap = dds.getNsaDocuments();
@@ -106,7 +112,7 @@ public class ConfigWriter {
       for (String networkId : nsa.getDocument().getNetworkId()) {
         log.info(">>> Processing NSA {}, topology {}", nsa.nsaId, networkId);
         if (writeNSA(rmTemplate, logTemplate, nsa.getDocument().getId(),
-                networkId, portConfig, nsa_count)) {
+                networkId, portConfig, nsa_count, peers)) {
           nsa_count++;
         }
       }
@@ -143,7 +149,12 @@ public class ConfigWriter {
    * @param count
    */
   private boolean writeNSA(String rmTemplate, String logTemplate, String providerNsaId,
-          String networkId, List<PortMap> portConfig, int count) {
+          String networkId, List<PortMap> portConfig, int count, Map<String, Peer> peers) {
+
+    // We need to do some magic on the networkIds for OpenNSA.
+    String stripped = strip_networkUrn(networkId);
+    String nid = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":topology");
+    String nsa = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":nsa");
 
     // Filter the list of ports to only those from the target network.
     List<String> lines = portConfig.stream()
@@ -152,10 +163,18 @@ public class ConfigWriter {
               p.getType(),
               p.getPortName(),
               Strings.isNullOrEmpty(p.getRemote()) ? "-" : p.getRemote(),
-              p.getLabel(),
+              p.getLabel().replace("mpls", "vlan"),
               p.getBandwidth(),
               p.getInter()))
             .collect(Collectors.toList());
+
+    // Now add any additional ports specified on the configuration file.
+    Peer peer = peers.get(nid);
+    if (peer != null) {
+      peer.getPort().forEach((port) -> {
+        lines.add(port.toString());
+      });
+    }
 
     if (lines.isEmpty()) {
       log.error("writeNSA: no valid ports for providerId {}, networkId = {}", providerNsaId, networkId);
@@ -166,7 +185,7 @@ public class ConfigWriter {
     write("nsa" + count + ".nrm", lines);
 
     // Write out the NRM config file associated with this topology.
-    String stripped = strip_networkUrn(networkId);
+
     write("nsa" + count + ".conf",
             Lists.newArrayList(String.format(NRMCONF,
                     9000 + count, // port
@@ -178,8 +197,7 @@ public class ConfigWriter {
                     password)));
 
     // Write out the SENSE-NSI-RM configuration file for this NSA.
-    String nid = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":topology");
-    String nsa = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":nsa");
+
     write("sense" + count + ".yaml",
             Lists.newArrayList(String.format(rmTemplate,
                     address, //server.address
@@ -381,6 +399,7 @@ public class ConfigWriter {
     // For each topology we need to get the bidirectional ports,
     // list of associated VLANs (from unidirectional ports), and
     // any isAlias relationships.
+    Date now = new Date();
     for (TopologyMap topology : list) {
       Nml nml = new Nml(topology.getDocument());
       List<NmlBidirectionalPortType> biList = nml.getBidirectionalPorts();
@@ -427,7 +446,7 @@ public class ConfigWriter {
       for (NmlPortGroupType pg : nml.getInboundPortGroups()) {
         try {
           // Parse the port group into a usable STP identifier.
-          SimpleStp stp = new SimpleStp(pg);
+          SimpleStp stp = new SimpleStp(fixPortGroupType(pg));
 
           // Find the parent bidirectional port.
           PortMap bi = uniToBiMap.get(stp.getId());
@@ -472,7 +491,7 @@ public class ConfigWriter {
       for (NmlPortType p : nml.getInboundPorts()) {
         try {
           // Parse the port into a usable STP identifier.
-          SimpleStp stp = new SimpleStp(p);
+          SimpleStp stp = new SimpleStp(fixPortType(p));
 
           // Find the parent bidirectional port.
           PortMap bi = uniToBiMap.get(stp.getId());
@@ -534,6 +553,50 @@ public class ConfigWriter {
     }
 
     return biMap;
+  }
+
+  public NmlPortGroupType fixPortGroupType(NmlPortGroupType pg) throws IllegalArgumentException {
+    // We need to convert any MPLS labels to VLAN labels for the simulator,
+    // as well as make sure the label value ranges are correct.
+    for (NmlLabelGroupType lgt : pg.getLabelGroup()) {
+      String labelType = lgt.getLabeltype();
+      if (!Strings.isNullOrEmpty(labelType)) {
+        if (NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
+          // GEANT doesn't see to understand the legal VLAN range.
+          String value = lgt.getValue();
+          if (!Strings.isNullOrEmpty(value)) {
+            lgt.setValue(value.replace("4096", "4095"));
+          }
+        } else {
+          lgt.setLabeltype(NSI_VLAN_LABEL_URN);
+          lgt.setValue("1-4095");
+        }
+      }
+    }
+
+    return pg;
+  }
+
+  public NmlPortType fixPortType(NmlPortType pt) throws IllegalArgumentException {
+    // We need to convert any MPLS labels to VLAN labels for the simulator,
+    // as well as make sure the label value ranges are correct.
+    if (pt.getLabel() != null) {
+      String labelType = pt.getLabel().getLabeltype();
+      if (!Strings.isNullOrEmpty(labelType)) {
+        if (NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
+          // GEANT doesn't see to understand the legal VLAN range.
+          String value = pt.getLabel().getValue();
+          if (!Strings.isNullOrEmpty(value)) {
+            pt.getLabel().setValue(value.replace("4096", "4095"));
+          }
+        } else {
+          pt.getLabel().setLabeltype(NSI_VLAN_LABEL_URN);
+          pt.getLabel().setValue("1-4095");
+        }
+      }
+    }
+
+    return pt;
   }
 
   /**

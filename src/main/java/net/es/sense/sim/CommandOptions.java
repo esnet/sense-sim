@@ -19,6 +19,7 @@ public class CommandOptions {
   private static final String SENSE_RM_CONFIG_FILE = "src/main/resources/sense-rm.yaml";
   private static final String SCHEMA_FILE = "src/main/resources/schema.sql";
   private static final String SENSE_RM_LOG_FILE = "src/main/resources/logback.xml";
+  private static final String NSA_PEERS_FILE = "src/main/resources/peers.yaml";
   private static final String SENSE_ADDRESS = "localhost";
 
   public static final String DDS = "dds";
@@ -29,6 +30,7 @@ public class CommandOptions {
   public static final String LOG = "log";
   public static final String OUT = "out";
   public static final String ADDRESS = "addr";
+  public static final String PEERS = "peers";
 
   private CommandLine clp;
   private final Options commandOptions;
@@ -95,6 +97,10 @@ public class CommandOptions {
     Option addr = new Option(ADDRESS, true, "Address to bind SENSE-RM REST endpoint.");
     rm.setOptionalArg(true);
     options.addOption(addr);
+
+    Option peers = new Option(PEERS, true, "File used to specify additional NSA port adjacencies.");
+    rm.setOptionalArg(true);
+    options.addOption(peers);
 
     return options;
   }
@@ -185,5 +191,16 @@ public class CommandOptions {
       return clp.getOptionValue(ADDRESS);
     }
     return SENSE_ADDRESS;
+  }
+
+  /**
+   *
+   * @return
+   */
+  public String getPeers() {
+    if (clp.hasOption(PEERS)) {
+      return clp.getOptionValue(PEERS);
+    }
+    return NSA_PEERS_FILE;
   }
 }

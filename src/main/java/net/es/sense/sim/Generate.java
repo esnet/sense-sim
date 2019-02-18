@@ -43,6 +43,7 @@ public class Generate {
             .outDir(options.getOut())
             .logFile(options.getLog())
             .address(options.getAddress())
+            .peersFile(options.getPeers())
             .build();
     cw.write();
   }
