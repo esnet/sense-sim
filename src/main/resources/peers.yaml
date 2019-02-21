@@ -52,7 +52,7 @@
     attributes: "-"
   - type: "ethernet"
     name: "to_testbed7"
-    remote: "testbed7.surfnet.nl:1990:topology#to_netherlight-testbed7-(in|out)"
+    remote: "netherlight7.surfnet.nl:1990:topology#to_netherlight-testbed7-(in|out)"
     label: "vlan:1-4095"
     bandwidth: "100000"
     _interface: "fk1"
