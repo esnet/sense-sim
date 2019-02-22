@@ -62,7 +62,7 @@
   port:
   - type: "ethernet"
     name: "to_netherlight-testbed7"
-    remote: "netherlight-testbed7.surfnet.nl:1990#to_testbed7-(in|out)"
+    remote: "netherlight-testbed7.surfnet.nl:1990:topology#to_testbed7-(in|out)"
     label: "vlan:1-4095"
     bandwidth: "100000"
     _interface: "fk0"

@@ -30,7 +30,6 @@ import net.es.nsi.common.Nml;
 import net.es.nsi.common.SimpleLabel;
 import net.es.nsi.common.SimpleLabels;
 import net.es.nsi.common.SimpleStp;
-import static net.es.nsi.common.SimpleStp.NSI_VLAN_LABEL_URN;
 import net.es.nsi.common.jaxb.nml.NmlBidirectionalPortType;
 import net.es.nsi.common.jaxb.nml.NmlLabelGroupType;
 import net.es.nsi.common.jaxb.nml.NmlPortGroupType;
@@ -106,14 +105,17 @@ public class ConfigWriter {
     List<PortMap> portConfig = getPortConfig(topologyMap.values());
 
     // Write the SENSE-NSI-RM and OpenNSA configuration files for each network.
+    List<Provider> providers = new ArrayList<>();
     int nsa_count = 0;
     for (NsaMap nsa : nsaMap.values()) {
       log.info("Processing NSA {}", nsa.nsaId);
       for (String networkId : nsa.getDocument().getNetworkId()) {
         log.info(">>> Processing NSA {}, topology {}", nsa.nsaId, networkId);
-        if (writeNSA(rmTemplate, logTemplate, nsa.getDocument().getId(),
-                networkId, portConfig, nsa_count, peers)) {
+        Optional<Provider> provider = writeNSA(rmTemplate, logTemplate, nsa.getDocument().getId(),
+                networkId, portConfig, nsa_count, peers);
+        if (provider.isPresent()) {
           nsa_count++;
+          providers.add(provider.get());
         }
       }
     }
@@ -129,6 +131,9 @@ public class ConfigWriter {
 
     // Write out the peer discovery information to configure the DDS.
     writeDiscovery(nsa_count);
+
+    // Write the providers entry for the nsi-requesters config file.
+    writeProviders(providers);
   }
 
   /**
@@ -148,13 +153,15 @@ public class ConfigWriter {
    * @param portConfig
    * @param count
    */
-  private boolean writeNSA(String rmTemplate, String logTemplate, String providerNsaId,
+  private Optional<Provider> writeNSA(String rmTemplate, String logTemplate, String providerNsaId,
           String networkId, List<PortMap> portConfig, int count, Map<String, Peer> peers) {
 
     // We need to do some magic on the networkIds for OpenNSA.
     String stripped = strip_networkUrn(networkId);
     String nid = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":topology");
     String nsa = SimpleStp.NSI_NETWORK_URN_PREFIX + stripped.concat(":nsa");
+    int oport = 9000 + count;
+    int sport = 800 + count;
 
     // Filter the list of ports to only those from the target network.
     List<String> lines = portConfig.stream()
@@ -178,7 +185,7 @@ public class ConfigWriter {
 
     if (lines.isEmpty()) {
       log.error("writeNSA: no valid ports for providerId {}, networkId = {}", providerNsaId, networkId);
-      return false;
+      return Optional.empty();
     }
 
     // Write out the OpenNSA port configuration file for this network topology.
@@ -188,7 +195,7 @@ public class ConfigWriter {
 
     write("nsa" + count + ".conf",
             Lists.newArrayList(String.format(NRMCONF,
-                    9000 + count, // port
+                    oport, // port
                     stripped, // network
                     count, // logfile
                     count, // nrmmap
@@ -201,9 +208,9 @@ public class ConfigWriter {
     write("sense" + count + ".yaml",
             Lists.newArrayList(String.format(rmTemplate,
                     address, //server.address
-                    8000 + count, // server.port
+                    sport, // server.port
                     address, // sense.root
-                    8000 + count, // sense.root
+                    sport, // sense.root
                     count, // logging.config
                     count, // logging.file
                     count, // spring.datasource.url
@@ -211,18 +218,22 @@ public class ConfigWriter {
                     password, // spring.datasource.password
                     nid, // nsi.nsaId
                     address, // nsi.ddsUrl address
-                    8000 + count, // nsi.ddsUrl port
+                    sport, // nsi.ddsUrl port
                     nsa, // nsi.providerNsaId
-                    9000 + count, // nsi.providerConnectionURL
+                    oport, // nsi.providerConnectionURL
                     address, // nsi.requesterConnectionURL address
-                    8000 + count, // nsi.requesterConnectionURL port
+                    sport, // nsi.requesterConnectionURL port
                     nid))); // networkId
 
     // Write out the SENSE-RM log configuration file.
     write("sense" + count + "-logback.xml",
             Lists.newArrayList(logTemplate.replace(":filename:", "sense-rm" + count + ".log")));
 
-    return true;
+    return Optional.of(Provider.builder().
+            id(nsa)
+            .url("http://localhost:" + oport + "/NSI/services/CS2")
+            .portPrefix(nid)
+            .build());
   }
 
   /**
@@ -383,6 +394,20 @@ public class ConfigWriter {
       lines.add(String.format(PEER, 9000 + i));
     }
     write("peer.xml", lines);
+  }
+
+  /**
+   * Write out the nsi-requester provider configuration information for all
+   * simulated OpenNSA.
+   *
+   * @param providers List of providers.
+   */
+  private void writeProviders(List<Provider> providers) {
+    List<String> lines = new ArrayList<>();
+    providers.forEach((p) -> {
+      lines.add(p.toString());
+    });
+    write("providers.xml", lines);
   }
 
   /**
@@ -561,14 +586,14 @@ public class ConfigWriter {
     for (NmlLabelGroupType lgt : pg.getLabelGroup()) {
       String labelType = lgt.getLabeltype();
       if (!Strings.isNullOrEmpty(labelType)) {
-        if (NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
+        if (SimpleStp.NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
           // GEANT doesn't see to understand the legal VLAN range.
           String value = lgt.getValue();
           if (!Strings.isNullOrEmpty(value)) {
             lgt.setValue(value.replace("4096", "4095"));
           }
         } else {
-          lgt.setLabeltype(NSI_VLAN_LABEL_URN);
+          lgt.setLabeltype(SimpleStp.NSI_VLAN_LABEL_URN);
           lgt.setValue("1-4095");
         }
       }
@@ -583,14 +608,14 @@ public class ConfigWriter {
     if (pt.getLabel() != null) {
       String labelType = pt.getLabel().getLabeltype();
       if (!Strings.isNullOrEmpty(labelType)) {
-        if (NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
+        if (SimpleStp.NSI_VLAN_LABEL_URN.equalsIgnoreCase(labelType)) {
           // GEANT doesn't see to understand the legal VLAN range.
           String value = pt.getLabel().getValue();
           if (!Strings.isNullOrEmpty(value)) {
             pt.getLabel().setValue(value.replace("4096", "4095"));
           }
         } else {
-          pt.getLabel().setLabeltype(NSI_VLAN_LABEL_URN);
+          pt.getLabel().setLabeltype(SimpleStp.NSI_VLAN_LABEL_URN);
           pt.getLabel().setValue("1-4095");
         }
       }
